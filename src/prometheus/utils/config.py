@@ -28,12 +28,11 @@ def get_settings() -> Settings:
     load_dotenv()  # For testing with example .env
 
     return Settings(
-        mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db"),
+        mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
         mlflow_experiment=os.getenv("MLFLOW_EXPERIMENT", "prometheus_payment_risk"),
         mlflow_model_name=os.getenv("MLFLOW_MODEL_NAME", "prometheus_payment_risk"),
-
+        
         duckdb_path=os.getenv("DUCKDB_PATH", "./data/prometheus.duckdb"),
-
         drift_window_size=int(os.getenv("DRIFT_WINDOW_SIZE", "5000")),
         drift_psi_threshold=float(os.getenv("DRIFT_PSI_THRESHOLD", "0.2")),
     )

@@ -14,11 +14,15 @@ class DriftSpec:
     drift_strength modulator:
       0.0  -> has the appearance of a training distribution
       1.0+ -> clearly shifted distribution
+
+    Intercept:
+      offset controlling positive chargeback rate
+      more negative -> rarer chargebacks
     ------------------------------------------------------------------------------------------------
     """
     drift_strength: float = 0.0
     seed: int = 7
-
+    intercept: float = -5.2 # changed logit intercept from -5.0 to -5.2 (increase chargeback prevelence)
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
@@ -63,7 +67,7 @@ def make_payments(n: int, drift: DriftSpec) -> pd.DataFrame:
     log_amount = np.log1p(amount_gbp)
 
     logit = (
-        -5.0
+        drift.intercept
         + 0.55 * (log_amount - 3.8)                 # larger amounts are riskier
         + 0.35 * ip_country_mismatch
         + 0.40 * device_new

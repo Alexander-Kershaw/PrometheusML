@@ -16,9 +16,15 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 
 from prometheus.utils.config import get_settings
 
+# To silence the excessive MLflow logs
+import logging
+logging.getLogger("mlflow").setLevel(logging.WARNING)
+logging.getLogger("alembic").setLevel(logging.WARNING)
+
 
 def main() -> None:
     settings = get_settings()
+    print("MLFLOW_TRACKING_URI =", settings.mlflow_tracking_uri)
 
     
     # Load training data
@@ -153,7 +159,7 @@ def main() -> None:
 
         # Log and register the chosen model
         mlflow.sklearn.log_model(
-            best_pipe,
+            sk_model=best_pipe,
             name="model",
             registered_model_name=settings.mlflow_model_name,
         )

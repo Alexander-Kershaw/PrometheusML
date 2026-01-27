@@ -19,10 +19,10 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Training data with no drift
-    train = make_payments(n=50_000, drift=DriftSpec(drift_strength=0.0, seed=7))
-
+    train = make_payments(n=50_000, drift=DriftSpec(drift_strength=0.0, seed=7, intercept=-4.7))
+    
     # Production data with drifted population 
-    prod = make_payments(n=20_000, drift=DriftSpec(drift_strength=0.8, seed=99))
+    prod = make_payments(n=20_000, drift=DriftSpec(drift_strength=0.8, seed=99, intercept=-4.5))
 
     train.to_csv(out_dir / "raw_train.csv", index=False)
     prod.to_csv(out_dir / "raw_prod.csv", index=False)
