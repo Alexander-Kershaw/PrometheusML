@@ -12,6 +12,7 @@ from sklearn.metrics import accuracy_score, average_precision_score, roc_auc_sco
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.ensemble import HistGradientBoostingClassifier
 
 from prometheus.utils.config import get_settings
 
@@ -79,101 +80,90 @@ def main() -> None:
         ]
     )
 
-    model = LogisticRegression(
-        max_iter=1000,
-        class_weight="balanced",
-        solver="lbfgs",
-    )
+    # model candidates (Regression model and tree based model)
+    candidates = {
+        "logreg": LogisticRegression(
+            max_iter=1000,
+            class_weight="balanced",
+            solver="lbfgs",
+        ),
+        "hgb": HistGradientBoostingClassifier(
+            max_depth=6,
+            learning_rate=0.08,
+            max_iter=300,
+            random_state=42,
+        ),
+    }
 
-    pipeline = Pipeline(
-        steps=[
-            ("preprocess", preprocessor),
-            ("model", model),
-        ]
-    )
 
-    
     # MLflow logging
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow.set_experiment(settings.mlflow_experiment)
 
-    with mlflow.start_run(run_name="logreg_baseline"):
-        pipeline.fit(X_train, y_train)
+    with mlflow.start_run(run_name="logreg_hgb_baseline"):
+        
+        def eval_model(pipe: Pipeline) -> dict[str, float]:
+            pipe.fit(X_train, y_train)
 
-        # Validation
-        val_probs = pipeline.predict_proba(X_val)[:, 1]
-        val_auc = roc_auc_score(y_val, val_probs)
+            val_probs = pipe.predict_proba(X_val)[:, 1]
+            test_probs = pipe.predict_proba(X_test)[:, 1]
 
-        # Test
-        test_probs = pipeline.predict_proba(X_test)[:, 1]
-        test_preds = (test_probs >= 0.5).astype(int)
+            val_auc = roc_auc_score(y_val, val_probs)
+            test_auc = roc_auc_score(y_test, test_probs)
 
-        """
-        ---------------------------------------------------------------------------------------------------
-        Rare-event metrics 
-        ---------------------------------------------------------------------------------------------------
-        PR-AUC (Average Precision) is usually more meaningful than ROC-AUC for heavy imbalance.
+            val_ap = average_precision_score(y_val, val_probs)
+            test_ap = average_precision_score(y_test, test_probs)
 
-        ROC-AUC can look decent even when a model doesn't provide any meaningful fraud indicators
+            return {
+                "val_auc": float(val_auc),
+                "test_auc": float(test_auc),
+                "val_ap": float(val_ap),
+                "test_ap": float(test_ap),
+            }, val_probs, test_probs
 
-        A more realistic approach: Taking X percent of the most riskiest transactions, and
-        evaluating the true positives of chargebacks, aiming for high precision
-        ---------------------------------------------------------------------------------------------------
-        """
-        val_ap = average_precision_score(y_val, val_probs)
-        test_ap = average_precision_score(y_test, test_probs)
+        best_name = None
+        best_pipe = None
+        best_val_ap = -1.0
+        best_metrics = None
+        best_test_probs = None
 
-        # Precision/Recall at top-k percent of riskiest transactions
-        def pr_at_k(y_true: pd.Series, probs: np.ndarray, k_frac: float) -> tuple[float, float]:
-            k = max(1, int(len(probs) * k_frac))
-            idx = np.argsort(-probs)[:k]  # indices of top-k probabilities
-            y_top = y_true.iloc[idx].to_numpy()
-            precision = float(y_top.mean())
-            recall = float(y_top.sum() / max(1, y_true.sum()))  # positives caught
-            return precision, recall
+        for name, model in candidates.items():
+            pipe = Pipeline(steps=[("preprocess", preprocessor), ("model", model)])
+            metrics, _, test_probs = eval_model(pipe)
 
-        p_at_1pct, r_at_1pct = pr_at_k(y_test, test_probs, 0.01)
-        p_at_5pct, r_at_5pct = pr_at_k(y_test, test_probs, 0.05)
+            # Log logreg and hgb metrics
+            for k, v in metrics.items():
+                mlflow.log_metric(f"{name}_{k}", v)
 
-        # Log extra metrics
-        mlflow.log_metric("val_ap", float(val_ap))
-        mlflow.log_metric("test_ap", float(test_ap))
-        mlflow.log_metric("test_precision_at_1pct", float(p_at_1pct))
-        mlflow.log_metric("test_recall_at_1pct", float(r_at_1pct))
-        mlflow.log_metric("test_precision_at_5pct", float(p_at_5pct))
-        mlflow.log_metric("test_recall_at_5pct", float(r_at_5pct))
+            print(f"[{name}] val_ap={metrics['val_ap']:.4f} test_ap={metrics['test_ap']:.4f}")
 
-        print(f"Val AP  : {val_ap:.4f}")
-        print(f"Test AP : {test_ap:.4f}")
-        print(f"P@1% / R@1%: {p_at_1pct:.4f} / {r_at_1pct:.4f}")
-        print(f"P@5% / R@5%: {p_at_5pct:.4f} / {r_at_5pct:.4f}")
+            if metrics["val_ap"] > best_val_ap:
+                best_val_ap = metrics["val_ap"]
+                best_name = name
+                best_pipe = pipe
+                best_metrics = metrics
+                best_test_probs = test_probs
 
+        assert best_pipe is not None and best_name is not None and best_metrics is not None
 
-        test_auc = roc_auc_score(y_test, test_probs)
-        test_acc = accuracy_score(y_test, test_preds)
+        # Log chosen model and metrics
+        mlflow.log_param("chosen_model", best_name)
+        for k, v in best_metrics.items():
+            mlflow.log_metric(k, v)
 
-        # Log params
-        mlflow.log_param("model_type", "logistic_regression")
-        mlflow.log_param("class_weight", "balanced")
-        mlflow.log_param("threshold", 0.5)
-
-        # Log metrics
-        mlflow.log_metric("val_auc", float(val_auc))
-        mlflow.log_metric("test_auc", float(test_auc))
-        mlflow.log_metric("test_accuracy", float(test_acc))
-
-        # Log and register the pipeline as a model artifact
-        # (Prevents train/serve skew)
+        # Log and register the chosen model
         mlflow.sklearn.log_model(
-            pipeline,
+            best_pipe,
             name="model",
             registered_model_name=settings.mlflow_model_name,
         )
 
-        print("Training complete")
-        print(f"Val AUC : {val_auc:.4f}")
-        print(f"Test AUC: {test_auc:.4f}")
-        print(f"Test ACC: {test_acc:.4f}")
+        print("Chosen model:", best_name)
+        print(f"Val AP : {best_metrics['val_ap']:.4f}")
+        print(f"Test AP: {best_metrics['test_ap']:.4f}")
+        print(f"Val AUC : {best_metrics['val_auc']:.4f}")
+        print(f"Test AUC: {best_metrics['test_auc']:.4f}")
+
 
 
 if __name__ == "__main__":
