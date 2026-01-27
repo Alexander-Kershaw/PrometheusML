@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import StratifiedKFold, cross_val_score
 
 from prometheus.utils.config import get_settings
 
@@ -118,6 +119,9 @@ def main() -> None:
         ),
     }
 
+    # Single validation splitis too brittle
+    # Each candidate gets a 5-fold stratified cross validation AP on training data
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     # MLflow logging
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
@@ -144,37 +148,57 @@ def main() -> None:
                 "test_ap": float(test_ap),
             }, val_probs, test_probs
 
+        
         best_name = None
-        best_pipe = None
-        best_val_ap = -1.0
-        best_metrics = None
-        best_test_probs = None
+        best_model = None
+        best_cv_ap = -1.0
 
+        # Choose by cross-validated Average Precision on training set
         for name, model in candidates.items():
             pipe = Pipeline(steps=[("preprocess", preprocessor), ("model", model)])
-            metrics, _, test_probs = eval_model(pipe)
 
-            # Log logreg and hgb metrics
-            for k, v in metrics.items():
-                mlflow.log_metric(f"{name}_{k}", v)
+            cv_ap_scores = cross_val_score(
+                pipe,
+                X_train,
+                y_train,
+                cv=cv,
+                scoring="average_precision",
+                n_jobs=None,
+            )
+            cv_ap_mean = float(np.mean(cv_ap_scores))
+            cv_ap_std = float(np.std(cv_ap_scores))
 
-            print(f"[{name}] val_ap={metrics['val_ap']:.4f} test_ap={metrics['test_ap']:.4f}")
+            mlflow.log_metric(f"{name}_cv_ap_mean", cv_ap_mean)
+            mlflow.log_metric(f"{name}_cv_ap_std", cv_ap_std)
 
-            if metrics["val_ap"] > best_val_ap:
-                best_val_ap = metrics["val_ap"]
+            print(f"[{name}] cv_ap={cv_ap_mean:.4f}±{cv_ap_std:.4f}")
+
+            if cv_ap_mean > best_cv_ap:
+                best_cv_ap = cv_ap_mean
                 best_name = name
-                best_pipe = pipe
-                best_metrics = metrics
-                best_test_probs = test_probs
+                best_model = model
 
-        assert best_pipe is not None and best_name is not None and best_metrics is not None
+        assert best_name is not None and best_model is not None
 
-        # Log chosen model and metrics
+        # Fit chosen model (best CV AP) on full train -> then evaluate on val and test
+        best_pipe = Pipeline(steps=[("preprocess", preprocessor), ("model", best_model)])
+        best_pipe.fit(X_train, y_train)
+
+        val_probs = best_pipe.predict_proba(X_val)[:, 1]
+        test_probs = best_pipe.predict_proba(X_test)[:, 1]
+
+        val_auc = roc_auc_score(y_val, val_probs)
+        test_auc = roc_auc_score(y_test, test_probs)
+        val_ap = average_precision_score(y_val, val_probs)
+        test_ap = average_precision_score(y_test, test_probs)
+
         mlflow.log_param("chosen_model", best_name)
-        for k, v in best_metrics.items():
-            mlflow.log_metric(k, v)
+        mlflow.log_metric("cv_ap_mean", best_cv_ap)
+        mlflow.log_metric("val_ap", float(val_ap))
+        mlflow.log_metric("test_ap", float(test_ap))
+        mlflow.log_metric("val_auc", float(val_auc))
+        mlflow.log_metric("test_auc", float(test_auc))
 
-        # Log and register the chosen model
         mlflow.sklearn.log_model(
             sk_model=best_pipe,
             name="model",
@@ -182,11 +206,11 @@ def main() -> None:
         )
 
         print("Chosen model:", best_name)
-        print(f"Val AP : {best_metrics['val_ap']:.4f}")
-        print(f"Test AP: {best_metrics['test_ap']:.4f}")
-        print(f"Val AUC : {best_metrics['val_auc']:.4f}")
-        print(f"Test AUC: {best_metrics['test_auc']:.4f}")
-
+        print(f"CV AP  : {best_cv_ap:.4f}")
+        print(f"Val AP : {val_ap:.4f}")
+        print(f"Test AP: {test_ap:.4f}")
+        print(f"Val AUC : {val_auc:.4f}")
+        print(f"Test AUC: {test_auc:.4f}")
 
 
 if __name__ == "__main__":
