@@ -3,6 +3,7 @@ from __future__ import annotations
 import glob
 import subprocess
 from pathlib import Path
+from prometheus.utils.config import get_settings
 
 import requests
 
@@ -34,6 +35,7 @@ def run(cmd: list[str]) -> str:
 
 
 def main() -> None:
+
     # Run monitoring (report writing)
     mon_out = run(["python", "scripts/monitor.py"])
     print(mon_out.strip())
@@ -56,11 +58,17 @@ def main() -> None:
     promoted = "PROMOTED_FLAG=1" in retr_out
     print(f"Promoted new model status: {promoted}")
 
+    settings = get_settings()
+    
     # Reload API if model promoted
-    if promoted:
-        r = requests.post(f"{API}/reload_model", timeout=10)
-        r.raise_for_status()
-        print("Reloaded API:", r.json())
+    r = requests.post(
+        f"{API}/reload_model",
+        headers={"X-Reload-Token": settings.reload_token},
+        timeout=10,
+    )
+    r.raise_for_status()
+    print("Reloaded API:", r.json())
+
 
 
 if __name__ == "__main__":
