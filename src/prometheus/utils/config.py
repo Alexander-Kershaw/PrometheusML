@@ -28,7 +28,7 @@ def get_settings() -> Settings:
     load_dotenv()  # For testing with example .env
 
     return Settings(
-        mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
+        mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db"),
         mlflow_experiment=os.getenv("MLFLOW_EXPERIMENT", "prometheus_payment_risk"),
         mlflow_model_name=os.getenv("MLFLOW_MODEL_NAME", "prometheus_payment_risk"),
 

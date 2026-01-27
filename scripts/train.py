@@ -125,7 +125,7 @@ def main() -> None:
         # (Prevents train/serve skew)
         mlflow.sklearn.log_model(
             pipeline,
-            artifact_path="model",
+            name="model",
             registered_model_name=settings.mlflow_model_name,
         )
 
