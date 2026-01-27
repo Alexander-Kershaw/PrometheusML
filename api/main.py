@@ -89,6 +89,12 @@ def _load_latest_model() -> tuple[Any, str]:
     return model, str(v.version)
 
 
+def _reload() -> dict[str, str]:
+    global _model, _model_version
+    _model, _model_version = _load_latest_model()
+    return {"status": "ok", "model_name": MODEL_NAME, "model_version": _model_version}
+
+
 @app.on_event("startup")
 def _startup() -> None:
     global _model, _model_version
@@ -150,7 +156,6 @@ def predict(req: PaymentFeatures) -> PredictResponse:
         pred=pred,
     )
 
-
 @app.post("/feedback")
 def feedback(req: FeedbackRequest) -> dict[str, str]:
     if _model_version is None:
@@ -162,3 +167,8 @@ def feedback(req: FeedbackRequest) -> dict[str, str]:
         outcome_label=req.outcome_label,
     )
     return {"status": "ok"}
+
+
+@app.post("/reload_model")
+def reload_model() -> dict[str, str]:
+    return _reload()
