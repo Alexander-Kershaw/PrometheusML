@@ -4,11 +4,12 @@ import uuid
 from typing import Any
 
 import mlflow
-import mlflow.pyfunc
+import mlflow.sklearn # Stopped used pyfunc internals
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from fastapi import Header, HTTPException
 
 from prometheus.serving.inference_store import ensure_store, log_inference, log_feedback
 from prometheus.utils.config import get_settings
@@ -68,10 +69,11 @@ def _feature_engineering(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_latest_model() -> tuple[Any, str]:
-    
-    # Load the latest model from MLflow models
+    """
+    Load latest model version from MLflow Model Registry as a sklearn model,
+    so we can call predict_proba more reliably.
+    """
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-
     client = mlflow.tracking.MlflowClient()
 
     latest = client.get_latest_versions(MODEL_NAME)
@@ -81,11 +83,10 @@ def _load_latest_model() -> tuple[Any, str]:
             "Run training first to register a model."
         )
 
-    # choosing max numeric version
     v = max(latest, key=lambda mv: int(mv.version))
     model_uri = f"models:/{MODEL_NAME}/{v.version}"
 
-    model = mlflow.pyfunc.load_model(model_uri)
+    model = mlflow.sklearn.load_model(model_uri)
     return model, str(v.version)
 
 
@@ -134,7 +135,7 @@ def predict(req: PaymentFeatures) -> PredictResponse:
     # Apply same feature engineering as training
     df = _feature_engineering(df)
 
-    proba = float(_model._model_impl.predict_proba(df)[:, 1][0]) 
+    proba = float(_model.predict_proba(df)[:, 1][0])
     pred = int(proba >= 0.5)
 
     # Log inference
@@ -170,5 +171,8 @@ def feedback(req: FeedbackRequest) -> dict[str, str]:
 
 
 @app.post("/reload_model")
-def reload_model() -> dict[str, str]:
+def reload_model(x_reload_token: str | None = Header(default=None)) -> dict[str, str]:
+    if x_reload_token != settings.reload_token:
+        raise HTTPException(status_code=401, detail="invalid reload token")
     return _reload()
+

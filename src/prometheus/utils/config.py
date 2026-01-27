@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -20,19 +21,21 @@ class Settings:
     drift_window_size: int
     drift_psi_threshold: float
 
+    # Secure reloads
+    reload_token: str = "devtoken"
+
 
 def get_settings() -> Settings:
-    
-    # Load settings from environment variablesocal runs and Docker runs consistent
-    
-    load_dotenv()  # For testing with example .env
+    # Force repo-root .env
+    repo_root = Path(__file__).resolve().parents[3]
+    load_dotenv(repo_root / ".env", override=True)
 
     return Settings(
         mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
         mlflow_experiment=os.getenv("MLFLOW_EXPERIMENT", "prometheus_payment_risk"),
         mlflow_model_name=os.getenv("MLFLOW_MODEL_NAME", "prometheus_payment_risk"),
-        
         duckdb_path=os.getenv("DUCKDB_PATH", "./data/prometheus.duckdb"),
         drift_window_size=int(os.getenv("DRIFT_WINDOW_SIZE", "5000")),
         drift_psi_threshold=float(os.getenv("DRIFT_PSI_THRESHOLD", "0.2")),
+        reload_token=os.getenv("RELOAD_TOKEN", "devtoken"),
     )
