@@ -36,6 +36,19 @@ def main() -> None:
     X = df.drop(columns=[target] + drop_cols)
     y = df[target].astype(int)
 
+    # Feature engineering
+    X = X.copy()
+
+    # Amount normalized by recent activity 
+    X["amount_per_txn_24h"] = X["amount_gbp"] / (1.0 + X["txn_count_24h"])
+
+    # Some interaction flags that tend to matter in payment risk
+    X["night_and_mismatch"] = ((X["hour"] <= 5) & (X["ip_country_mismatch"] == 1)).astype(int)
+    X["new_device_and_high_velocity"] = ((X["device_new"] == 1) & (X["txn_count_24h"] >= 3)).astype(int)
+
+    # Smooth velocity feature
+    X["velocity_log"] = np.log1p(X["txn_count_24h"])
+
    
     # Stratified train/validation/test split 
     # (since chargeback is rare statified split balances and preserves original dataset proptions)
@@ -54,6 +67,8 @@ def main() -> None:
         "account_age_days",
         "txn_count_24h",
         "device_risk",
+        "amount_per_txn_24h",
+        "velocity_log",
     ]
     categorical_features = [
         "is_weekend",
@@ -61,6 +76,8 @@ def main() -> None:
         "payment_method",
         "ip_country_mismatch",
         "device_new",
+        "night_and_mismatch",
+        "new_device_and_high_velocity",
     ]
 
  
