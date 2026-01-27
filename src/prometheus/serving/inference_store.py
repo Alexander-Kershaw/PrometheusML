@@ -26,6 +26,7 @@ def ensure_store(path: str) -> None:
     con = duckdb.connect(path)
     try:
         con.execute(DDL)
+        con.execute(FEEDBACK_DDL)
     finally:
         con.close()
 
@@ -57,3 +58,30 @@ def log_inference(
         )
     finally:
         con.close()
+
+
+# Feedback stoarge table
+FEEDBACK_DDL = """
+create table if not exists feedback (
+    ts_utc           timestamp,
+    request_id       varchar,
+    outcome_label    integer
+);
+"""
+
+# Inserting feedback logs into table
+def log_feedback(*, path: str, request_id: str, outcome_label: int) -> None:
+    con = duckdb.connect(path)
+    try:
+        con.execute(FEEDBACK_DDL)
+        con.execute(
+            "insert into feedback values (?, ?, ?)",
+            [
+                datetime.now(timezone.utc).replace(tzinfo=None),
+                request_id,
+                int(outcome_label),
+            ],
+        )
+    finally:
+        con.close()
+

@@ -10,7 +10,7 @@ import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from prometheus.serving.inference_store import ensure_store, log_inference
+from prometheus.serving.inference_store import ensure_store, log_inference, log_feedback
 from prometheus.utils.config import get_settings
 
 
@@ -37,6 +37,11 @@ class PredictResponse(BaseModel):
     model_version: str
     proba: float
     pred: int
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str
+    outcome_label: int = Field(..., ge=0, le=1)
 
 
 # app 
@@ -144,3 +149,16 @@ def predict(req: PaymentFeatures) -> PredictResponse:
         proba=proba,
         pred=pred,
     )
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackRequest) -> dict[str, str]:
+    if _model_version is None:
+        raise RuntimeError("Model not loaded")
+
+    log_feedback(
+        path=settings.duckdb_path,
+        request_id=req.request_id,
+        outcome_label=req.outcome_label,
+    )
+    return {"status": "ok"}
