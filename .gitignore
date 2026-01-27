@@ -23,7 +23,7 @@ htmlcov/
 .idea/
 
 # Data
-data/
+/data/
 artifacts/
 reports/
 *.parquet
