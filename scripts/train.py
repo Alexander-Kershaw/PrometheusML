@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, average_precision_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -107,6 +107,47 @@ def main() -> None:
         # Test
         test_probs = pipeline.predict_proba(X_test)[:, 1]
         test_preds = (test_probs >= 0.5).astype(int)
+
+        """
+        ---------------------------------------------------------------------------------------------------
+        Rare-event metrics 
+        ---------------------------------------------------------------------------------------------------
+        PR-AUC (Average Precision) is usually more meaningful than ROC-AUC for heavy imbalance.
+
+        ROC-AUC can look decent even when a model doesn't provide any meaningful fraud indicators
+
+        A more realistic approach: Taking X percent of the most riskiest transactions, and
+        evaluating the true positives of chargebacks, aiming for high precision
+        ---------------------------------------------------------------------------------------------------
+        """
+        val_ap = average_precision_score(y_val, val_probs)
+        test_ap = average_precision_score(y_test, test_probs)
+
+        # Precision/Recall at top-k percent of riskiest transactions
+        def pr_at_k(y_true: pd.Series, probs: np.ndarray, k_frac: float) -> tuple[float, float]:
+            k = max(1, int(len(probs) * k_frac))
+            idx = np.argsort(-probs)[:k]  # indices of top-k probabilities
+            y_top = y_true.iloc[idx].to_numpy()
+            precision = float(y_top.mean())
+            recall = float(y_top.sum() / max(1, y_true.sum()))  # positives caught
+            return precision, recall
+
+        p_at_1pct, r_at_1pct = pr_at_k(y_test, test_probs, 0.01)
+        p_at_5pct, r_at_5pct = pr_at_k(y_test, test_probs, 0.05)
+
+        # Log extra metrics
+        mlflow.log_metric("val_ap", float(val_ap))
+        mlflow.log_metric("test_ap", float(test_ap))
+        mlflow.log_metric("test_precision_at_1pct", float(p_at_1pct))
+        mlflow.log_metric("test_recall_at_1pct", float(r_at_1pct))
+        mlflow.log_metric("test_precision_at_5pct", float(p_at_5pct))
+        mlflow.log_metric("test_recall_at_5pct", float(r_at_5pct))
+
+        print(f"Val AP  : {val_ap:.4f}")
+        print(f"Test AP : {test_ap:.4f}")
+        print(f"P@1% / R@1%: {p_at_1pct:.4f} / {r_at_1pct:.4f}")
+        print(f"P@5% / R@5%: {p_at_5pct:.4f} / {r_at_5pct:.4f}")
+
 
         test_auc = roc_auc_score(y_test, test_probs)
         test_acc = accuracy_score(y_test, test_preds)
